@@ -271,14 +271,14 @@ def agendar_cita(cedula, fecha, hora, peluquero, servicio):
         return False, "Cedula no encontrada. El cliente no esta registrado."
 
     try:
-        # Verificar disponibilidad de la hora
+        # Verificar disponibilidad de la hora PARA ESE BARBERO
         resp = requests.get(
             f"{SUPABASE_URL}/rest/v1/citas",
             headers=HEADERS,
-            params={"fecha": f"eq.{fecha}", "hora": f"eq.{hora}"}
+            params={"fecha": f"eq.{fecha}", "hora": f"eq.{hora}", "peluquero": f"eq.{peluquero}"}
         )
         if resp.status_code == 200 and len(resp.json()) > 0:
-            return False, f"La hora {hora}:00 del {fecha} ya esta reservada."
+            return False, f"{peluquero} ya tiene una cita a las {hora}:00 del {fecha}."
 
         # Guardar la nueva cita
         resp = requests.post(
@@ -465,10 +465,163 @@ def get_citas_sin_confirmar():
     return resultados
 
 
+# ── FUNCIONES DE BARBEROS ────────────────────────────────────
+
+DIAS_SEMANA = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]
+
+
+def get_barberos(solo_activos=False):
+    """Retorna lista de barberos (dicts). Si solo_activos=True, solo los activos."""
+    resultados = []
+    try:
+        params = {"order": "nombre.asc"}
+        if solo_activos:
+            params["activo"] = "eq.true"
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/barberos",
+            headers=HEADERS,
+            params=params
+        )
+        if resp.status_code == 200:
+            resultados = resp.json()
+    except requests.exceptions.RequestException:
+        pass
+    return resultados
+
+
+def agregar_barbero(nombre):
+    if nombre.strip() == "":
+        return False, "El nombre del barbero no puede estar vacio."
+    if not nombre.replace(" ", "").isalpha():
+        return False, "El nombre debe contener solo letras."
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/barberos",
+            headers=HEADERS,
+            params={"nombre": f"eq.{nombre}"}
+        )
+        if resp.status_code == 200 and len(resp.json()) > 0:
+            return False, "Ese barbero ya existe."
+        resp = requests.post(
+            f"{SUPABASE_URL}/rest/v1/barberos",
+            headers=HEADERS,
+            json={"nombre": nombre, "activo": True, "dias_descanso": ""}
+        )
+        if resp.status_code in (200, 201):
+            return True, f"Barbero {nombre} agregado."
+        return False, "Error al agregar el barbero."
+    except requests.exceptions.RequestException:
+        return False, "Error de conexion con la base de datos."
+
+
+def eliminar_barbero(barbero_id):
+    try:
+        resp = requests.delete(
+            f"{SUPABASE_URL}/rest/v1/barberos",
+            headers=HEADERS,
+            params={"id": f"eq.{barbero_id}"}
+        )
+        return resp.status_code in (200, 204)
+    except requests.exceptions.RequestException:
+        return False
+
+
+def set_activo_barbero(barbero_id, activo):
+    try:
+        resp = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/barberos",
+            headers=HEADERS,
+            params={"id": f"eq.{barbero_id}"},
+            json={"activo": activo}
+        )
+        return resp.status_code in (200, 204)
+    except requests.exceptions.RequestException:
+        return False
+
+
+def set_dias_descanso(barbero_id, dias_lista):
+    """Guarda los dias de descanso como string separado por comas."""
+    dias_str = ",".join(dias_lista)
+    try:
+        resp = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/barberos",
+            headers=HEADERS,
+            params={"id": f"eq.{barbero_id}"},
+            json={"dias_descanso": dias_str}
+        )
+        return resp.status_code in (200, 204)
+    except requests.exceptions.RequestException:
+        return False
+
+
+def horas_ocupadas_barbero(barbero, fecha):
+    """Retorna un set con las horas (str) ya reservadas para ese barbero en esa fecha."""
+    ocupadas = set()
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/citas",
+            headers=HEADERS,
+            params={"fecha": f"eq.{fecha}", "peluquero": f"eq.{barbero}"}
+        )
+        if resp.status_code == 200:
+            for row in resp.json():
+                ocupadas.add(str(row["hora"]))
+    except requests.exceptions.RequestException:
+        pass
+    return ocupadas
+
+
+def marcar_asistencia(barbero, fecha, presente):
+    """Marca o actualiza la asistencia (vino / no vino) de un barbero en una fecha."""
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/asistencia_barberos",
+            headers=HEADERS,
+            params={"barbero": f"eq.{barbero}", "fecha": f"eq.{fecha}"}
+        )
+        if resp.status_code == 200 and len(resp.json()) > 0:
+            reg_id = resp.json()[0]["id"]
+            resp2 = requests.patch(
+                f"{SUPABASE_URL}/rest/v1/asistencia_barberos",
+                headers=HEADERS,
+                params={"id": f"eq.{reg_id}"},
+                json={"presente": presente}
+            )
+            return resp2.status_code in (200, 204)
+        resp2 = requests.post(
+            f"{SUPABASE_URL}/rest/v1/asistencia_barberos",
+            headers=HEADERS,
+            json={"barbero": barbero, "fecha": fecha, "presente": presente}
+        )
+        return resp2.status_code in (200, 201)
+    except requests.exceptions.RequestException:
+        return False
+
+
+def get_asistencia(fecha):
+    """Retorna un dict {barbero: presente(bool)} para una fecha."""
+    estados = {}
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/asistencia_barberos",
+            headers=HEADERS,
+            params={"fecha": f"eq.{fecha}"}
+        )
+        if resp.status_code == 200:
+            for row in resp.json():
+                estados[row["barbero"]] = row["presente"]
+    except requests.exceptions.RequestException:
+        pass
+    return estados
+
+
 #  ESTADO DE SESION 
 
 if "pantalla" not in st.session_state:
     st.session_state.pantalla = "bienvenida"
+
+if "admin_seccion" not in st.session_state:
+    st.session_state.admin_seccion = "citas"
 
 
 def ir_a(pantalla):
@@ -645,35 +798,58 @@ elif st.session_state.pantalla == "agendar":
     st.markdown('<h1>AGENDAR CITA</h1>', unsafe_allow_html=True)
     st.markdown('<hr class="separador">', unsafe_allow_html=True)
 
-    with st.form("form_cita"):
-        cedula   = st.text_input("Cedula del cliente")
-        fecha    = st.text_input("Fecha de la cita (DD/MM/AAAA)")
-        hora     = st.selectbox("Hora de la cita", [str(h) for h in range(8, 21)])
-        peluquero = st.text_input("Nombre del peluquero")
-        servicio = st.selectbox("Servicio", [
-            "corte",
-            "barba",
-            "cejas",
-            "corte+barba",
-            "corte+cejas",
-            "corte+barba+cejas",
-            "otros"
-        ])
-        enviar = st.form_submit_button("CONFIRMAR RESERVA")
+    cedula = st.text_input("Cedula del cliente")
 
-    if enviar:
-        if not fecha_valida(fecha.strip()):
-            st.error("Fecha invalida. Use el formato DD/MM/AAAA.")
-        elif peluquero.strip() == "":
-            st.error("El nombre del peluquero no puede estar vacio.")
-        elif not peluquero.strip().replace(" ", "").isalpha():
-            st.error("El nombre del peluquero debe contener solo letras.")
+    fecha_obj = st.date_input(
+        "Fecha de la cita",
+        value=date.today(),
+        min_value=date.today(),
+        format="DD/MM/YYYY"
+    )
+    fecha_str = fecha_obj.strftime("%d/%m/%Y")
+    dia_semana = DIAS_SEMANA[fecha_obj.weekday()]
+
+    # Barberos activos que NO descansan ese dia
+    barberos_activos = get_barberos(solo_activos=True)
+    barberos_disponibles = [
+        b for b in barberos_activos
+        if dia_semana not in (b.get("dias_descanso") or "").split(",")
+    ]
+
+    if not barberos_activos:
+        st.warning("No hay barberos registrados. Agregalos en Administracion -> Barberos.")
+    elif not barberos_disponibles:
+        st.warning(f"Ningun barbero trabaja el {dia_semana} ({fecha_str}). Revisa los dias de descanso en Administracion.")
+    else:
+        barbero = st.selectbox("Barbero", [b["nombre"] for b in barberos_disponibles])
+
+        # Horas libres SOLO para el barbero elegido (si esta ocupado a esa hora, no aparece)
+        ocupadas = horas_ocupadas_barbero(barbero, fecha_str)
+        horas_libres = [str(h) for h in range(8, 21) if str(h) not in ocupadas]
+
+        if not horas_libres:
+            st.warning(f"{barbero} no tiene horas disponibles el {fecha_str}.")
         else:
-            ok, msg = agendar_cita(cedula.strip(), fecha.strip(), hora, peluquero.strip(), servicio)
-            if ok:
-                st.success(msg)
-            else:
-                st.error(msg)
+            hora = st.selectbox("Hora de la cita", horas_libres)
+            servicio = st.selectbox("Servicio", [
+                "corte",
+                "barba",
+                "cejas",
+                "corte+barba",
+                "corte+cejas",
+                "corte+barba+cejas",
+                "otros"
+            ])
+
+            if st.button("CONFIRMAR RESERVA"):
+                if cedula.strip() == "" or not cedula.strip().isdigit():
+                    st.error("Ingrese una cedula valida.")
+                else:
+                    ok, msg = agendar_cita(cedula.strip(), fecha_str, hora, barbero, servicio)
+                    if ok:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
 
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("← VOLVER AL MENU"):
@@ -803,43 +979,137 @@ elif st.session_state.pantalla == "admin":
             else:
                 st.error("Clave incorrecta.")
     else:
-        # TABLA 1: Sin confirmar
-        st.markdown("<h3>PENDIENTES DE CONFIRMACION</h3>", unsafe_allow_html=True)
-        sin_confirmar = get_citas_sin_confirmar()
-        if sin_confirmar:
-            for r in sin_confirmar:
-                st.markdown(f"""
-                <div class="resultado-card">
-                    <b>{r['Fecha']}</b> &nbsp;|&nbsp;
-                    <b>{r['Hora']}</b> &nbsp;|&nbsp;
-                    {r['Cliente']} ({r['Cedula']}) &nbsp;|&nbsp;
-                    {r['Peluquero']} &nbsp;|&nbsp;
-                    {r['Servicio']}
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.info("Todos los clientes han confirmado su asistencia.")
+        # Selector de seccion: Citas o Barberos
+        sec1, sec2 = st.columns(2)
+        with sec1:
+            if st.button("CITAS", key="adm_sec_citas"):
+                st.session_state.admin_seccion = "citas"
+                st.rerun()
+        with sec2:
+            if st.button("BARBEROS", key="adm_sec_barberos"):
+                st.session_state.admin_seccion = "barberos"
+                st.rerun()
+        st.markdown('<hr class="separador">', unsafe_allow_html=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
+        if st.session_state.admin_seccion == "citas":
+            # TABLA 1: Sin confirmar
+            st.markdown("<h3>PENDIENTES DE CONFIRMACION</h3>", unsafe_allow_html=True)
+            sin_confirmar = get_citas_sin_confirmar()
+            if sin_confirmar:
+                for r in sin_confirmar:
+                    st.markdown(f"""
+                    <div class="resultado-card">
+                        <b>{r['Fecha']}</b> &nbsp;|&nbsp;
+                        <b>{r['Hora']}</b> &nbsp;|&nbsp;
+                        {r['Cliente']} ({r['Cedula']}) &nbsp;|&nbsp;
+                        {r['Peluquero']} &nbsp;|&nbsp;
+                        {r['Servicio']}
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("Todos los clientes han confirmado su asistencia.")
 
-        # TABLA 2: Confirmados
-        st.markdown("<h3>ASISTENCIAS CONFIRMADAS</h3>", unsafe_allow_html=True)
-        confirmados = get_citas_confirmadas()
-        if confirmados:
-            for r in confirmados:
-                st.markdown(f"""
-                <div class="resultado-card" style="border-left-color:#2d6a30;">
-                    <b>{r['Fecha']}</b> &nbsp;|&nbsp;
-                    <b>{r['Hora']}</b> &nbsp;|&nbsp;
-                    {r['Cliente']} ({r['Cedula']}) &nbsp;|&nbsp;
-                    Confirmado: {r['Confirmado a las']}
-                </div>
-                """, unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # TABLA 2: Confirmados
+            st.markdown("<h3>ASISTENCIAS CONFIRMADAS</h3>", unsafe_allow_html=True)
+            confirmados = get_citas_confirmadas()
+            if confirmados:
+                for r in confirmados:
+                    st.markdown(f"""
+                    <div class="resultado-card" style="border-left-color:#2d6a30;">
+                        <b>{r['Fecha']}</b> &nbsp;|&nbsp;
+                        <b>{r['Hora']}</b> &nbsp;|&nbsp;
+                        {r['Cliente']} ({r['Cedula']}) &nbsp;|&nbsp;
+                        Confirmado: {r['Confirmado a las']}
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.warning("Ninguna cita confirmada aun.")
+
         else:
-            st.warning("Ninguna cita confirmada aun.")
+            # ===== GESTION DE BARBEROS =====
+            st.markdown("<h3>GESTION DE BARBEROS</h3>", unsafe_allow_html=True)
+            barberos = get_barberos()
+            tab1, tab2, tab3 = st.tabs(["Asistencia", "Dias de descanso", "Agregar / Quitar"])
+
+            # --- TAB 1: Confirmar asistencia (vino / no vino) ---
+            with tab1:
+                fecha_asis = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY", key="fecha_asis")
+                fecha_asis_str = fecha_asis.strftime("%d/%m/%Y")
+                estados = get_asistencia(fecha_asis_str)
+                if not barberos:
+                    st.info("No hay barberos registrados.")
+                for b in barberos:
+                    nombre = b["nombre"]
+                    estado = estados.get(nombre)
+                    icono = "✅" if estado is True else ("❌" if estado is False else "—")
+                    c1, c2, c3 = st.columns([2, 1, 1])
+                    with c1:
+                        st.markdown(f"**{nombre}** &nbsp; {icono}")
+                    with c2:
+                        if st.button("Vino", key=f"vino_{b['id']}"):
+                            marcar_asistencia(nombre, fecha_asis_str, True)
+                            st.rerun()
+                    with c3:
+                        if st.button("No vino", key=f"novino_{b['id']}"):
+                            marcar_asistencia(nombre, fecha_asis_str, False)
+                            st.rerun()
+
+            # --- TAB 2: Dias de descanso ---
+            with tab2:
+                st.markdown("<p style='color:#e8d5a3;'>Marca los dias que NO trabaja cada barbero.</p>", unsafe_allow_html=True)
+                if not barberos:
+                    st.info("No hay barberos registrados.")
+                for b in barberos:
+                    nombre = b["nombre"]
+                    actuales = [d for d in (b.get("dias_descanso") or "").split(",") if d]
+                    seleccion = st.multiselect(
+                        f"{nombre} descansa:",
+                        DIAS_SEMANA,
+                        default=actuales,
+                        key=f"desc_{b['id']}"
+                    )
+                    if st.button(f"Guardar dias de {nombre}", key=f"savedesc_{b['id']}"):
+                        if set_dias_descanso(b["id"], seleccion):
+                            st.success(f"Dias de descanso de {nombre} actualizados.")
+                            st.rerun()
+                        else:
+                            st.error("Error al guardar.")
+
+            # --- TAB 3: Agregar / Quitar ---
+            with tab3:
+                nuevo = st.text_input("Nombre del nuevo barbero", key="nuevo_barbero")
+                if st.button("AGREGAR BARBERO", key="btn_add_barbero"):
+                    ok, msg = agregar_barbero(nuevo.strip())
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+                st.markdown('<hr class="separador">', unsafe_allow_html=True)
+                st.markdown("<p style='color:#e8d5a3;'>Barberos actuales:</p>", unsafe_allow_html=True)
+                if not barberos:
+                    st.info("No hay barberos registrados.")
+                for b in barberos:
+                    estado_txt = "Activo" if b.get("activo") else "Inactivo"
+                    c1, c2, c3 = st.columns([2, 1, 1])
+                    with c1:
+                        st.markdown(f"**{b['nombre']}** — {estado_txt}")
+                    with c2:
+                        label = "Activar" if not b.get("activo") else "Desactivar"
+                        if st.button(label, key=f"act_{b['id']}"):
+                            set_activo_barbero(b["id"], not b.get("activo"))
+                            st.rerun()
+                    with c3:
+                        if st.button("Quitar", key=f"del_{b['id']}"):
+                            eliminar_barbero(b["id"])
+                            st.rerun()
 
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("← VOLVER AL MENU"):
         st.session_state.admin_ok = False
+        st.session_state.admin_seccion = "citas"
         ir_a("menu")
         st.rerun()
