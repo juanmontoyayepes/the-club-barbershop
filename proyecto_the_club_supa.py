@@ -1,6 +1,6 @@
 import streamlit as st
 import requests
-from datetime import datetime
+from datetime import datetime, date
 
 # ============================================================
 #   BARBERIA THE CLUB - INTERFAZ STREAMLIT
@@ -205,13 +205,15 @@ HEADERS = {
 }
 
 
-def registrar_cliente(nombre, cedula, telefono):
-    if nombre == "" or cedula == "" or telefono == "":
+def registrar_cliente(nombre, apellido, cedula, telefono, fecha_nacimiento):
+    if nombre == "" or apellido == "" or cedula == "" or telefono == "":
         return False, "Todos los campos son obligatorios."
     if not cedula.isdigit():
         return False, "La cedula debe contener solo numeros."
     if not nombre.replace(" ", "").isalpha():
         return False, "El nombre debe contener solo letras."
+    if not apellido.replace(" ", "").isalpha():
+        return False, "El apellido debe contener solo letras."
 
     try:
         # Verificar si la cedula ya existe
@@ -227,10 +229,16 @@ def registrar_cliente(nombre, cedula, telefono):
         resp = requests.post(
             f"{SUPABASE_URL}/rest/v1/clientes",
             headers=HEADERS,
-            json={"cedula": cedula, "nombre": nombre, "telefono": telefono}
+            json={
+                "cedula": cedula,
+                "nombre": nombre,
+                "apellido": apellido,
+                "telefono": telefono,
+                "fecha_nacimiento": fecha_nacimiento
+            }
         )
         if resp.status_code in (200, 201):
-            return True, f"Cliente {nombre} registrado correctamente."
+            return True, f"Cliente {nombre} {apellido} registrado correctamente."
         return False, "Error al registrar el cliente. Intenta de nuevo."
 
     except requests.exceptions.RequestException:
@@ -238,7 +246,7 @@ def registrar_cliente(nombre, cedula, telefono):
 
 
 def buscar_cliente(cedula):
-    """Retorna el nombre del cliente o None si no existe."""
+    """Retorna el nombre completo del cliente o None si no existe."""
     try:
         resp = requests.get(
             f"{SUPABASE_URL}/rest/v1/clientes",
@@ -248,7 +256,10 @@ def buscar_cliente(cedula):
         if resp.status_code == 200:
             data = resp.json()
             if len(data) > 0:
-                return data[0]["nombre"]
+                nombre = data[0].get("nombre", "") or ""
+                apellido = data[0].get("apellido", "") or ""
+                completo = (nombre + " " + apellido).strip()
+                return completo if completo else None
     except requests.exceptions.RequestException:
         pass
     return None
@@ -468,7 +479,10 @@ def ir_a(pantalla):
 
 if st.session_state.pantalla == "bienvenida":
     set_fondo(FONDO_MADERA, "jpeg")
-    st.markdown('<p style="font-family:Bebas Neue,sans-serif;font-size:9rem;color:#c9a84c;text-align:center;letter-spacing:12px;text-shadow:0 0 40px rgba(201,168,76,0.6);margin:0;line-height:1;">THE CLUB</p>', unsafe_allow_html=True)
+    st.markdown('''<div style="text-align:center;">
+        <h1 style="font-family:'Bebas Neue',sans-serif; font-size:8.5rem; letter-spacing:16px; margin:0; padding-left:16px; line-height:0.95; background:linear-gradient(180deg,#f6e3a1 0%,#c9a84c 50%,#9c7a32 100%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; filter:drop-shadow(0 4px 30px rgba(201,168,76,0.4));">THE CLUB</h1>
+        <div style="width:180px; height:2px; margin:0.4rem auto 0 auto; background:linear-gradient(90deg, transparent, #c9a84c, transparent);"></div>
+    </div>''', unsafe_allow_html=True)
     st.markdown('<p class="subtitulo">Barbershop  —  Cali, Colombia</p>', unsafe_allow_html=True)
     st.markdown('<hr class="separador">', unsafe_allow_html=True)
 
@@ -492,13 +506,22 @@ elif st.session_state.pantalla == "registro":
     st.markdown('<hr class="separador">', unsafe_allow_html=True)
 
     with st.form("form_registro"):
-        nombre   = st.text_input("Nombre completo")
+        nombre   = st.text_input("Nombre")
+        apellido = st.text_input("Apellido")
         cedula   = st.text_input("Numero de cedula")
         telefono = st.text_input("Numero de telefono")
+        fecha_nac = st.date_input(
+            "Fecha de nacimiento",
+            value=date(2000, 1, 1),
+            min_value=date(1920, 1, 1),
+            max_value=date.today(),
+            format="DD/MM/YYYY"
+        )
         enviar   = st.form_submit_button("CONFIRMAR REGISTRO")
 
     if enviar:
-        ok, msg = registrar_cliente(nombre.strip(), cedula.strip(), telefono.strip())
+        fecha_nac_str = fecha_nac.strftime("%d/%m/%Y")
+        ok, msg = registrar_cliente(nombre.strip(), apellido.strip(), cedula.strip(), telefono.strip(), fecha_nac_str)
         if ok:
             st.success(msg)
             st.session_state.pantalla = "menu"
@@ -516,7 +539,10 @@ elif st.session_state.pantalla == "registro":
 
 elif st.session_state.pantalla == "menu":
     set_fondo(FONDO_MADERA, "jpeg")
-    st.markdown('<p style="font-family:Bebas Neue,sans-serif;font-size:9rem;color:#c9a84c;text-align:center;letter-spacing:12px;text-shadow:0 0 40px rgba(201,168,76,0.6);margin:0;line-height:1;">THE CLUB</p>', unsafe_allow_html=True)
+    st.markdown('''<div style="text-align:center;">
+        <h1 style="font-family:'Bebas Neue',sans-serif; font-size:8.5rem; letter-spacing:16px; margin:0; padding-left:16px; line-height:0.95; background:linear-gradient(180deg,#f6e3a1 0%,#c9a84c 50%,#9c7a32 100%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; filter:drop-shadow(0 4px 30px rgba(201,168,76,0.4));">THE CLUB</h1>
+        <div style="width:180px; height:2px; margin:0.4rem auto 0 auto; background:linear-gradient(90deg, transparent, #c9a84c, transparent);"></div>
+    </div>''', unsafe_allow_html=True)
     st.markdown('<p class="subtitulo">Seleccione una opcion</p>', unsafe_allow_html=True)
     st.markdown('<hr class="separador">', unsafe_allow_html=True)
 
@@ -630,7 +656,8 @@ elif st.session_state.pantalla == "agendar":
             "cejas",
             "corte+barba",
             "corte+cejas",
-            "corte+barba+cejas"
+            "corte+barba+cejas",
+            "otros"
         ])
         enviar = st.form_submit_button("CONFIRMAR RESERVA")
 
