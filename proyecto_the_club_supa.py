@@ -212,7 +212,7 @@ SUPABASE_KEY = "sb_publishable_dr7vWyfABYoO69pU-vbneg_iHOIXvMV"
 
 # --- Twilio WhatsApp ---
 TWILIO_SID   = "ACcab3c82b79c48dd760dc46dadb813515"
-TWILIO_TOKEN = "3aaa3c038c1459c3dedf8e1544df2a50"
+TWILIO_TOKEN = "760b372f3f0bd975ded31097c9882d25"
 TWILIO_WA    = "whatsapp:+14155238886"   # número sandbox de Twilio
 
 HEADERS = {
