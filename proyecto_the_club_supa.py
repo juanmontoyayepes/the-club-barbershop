@@ -615,6 +615,56 @@ def get_asistencia(fecha):
     return estados
 
 
+# ── FUNCIONES DE PRECIOS ─────────────────────────────────────
+
+SERVICIOS = ["corte", "barba", "cejas", "corte+barba", "corte+cejas", "corte+barba+cejas", "otros"]
+
+
+def get_precios():
+    """Retorna dict {servicio: precio} con todos los precios actuales."""
+    resultado = {}
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/precios",
+            headers=HEADERS
+        )
+        if resp.status_code == 200:
+            for row in resp.json():
+                resultado[row["servicio"]] = row["precio"]
+    except requests.exceptions.RequestException:
+        pass
+    return resultado
+
+
+def set_precio(servicio, precio):
+    """Crea o actualiza el precio de un servicio."""
+    try:
+        # Verificar si ya existe
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/precios",
+            headers=HEADERS,
+            params={"servicio": f"eq.{servicio}"}
+        )
+        if resp.status_code == 200 and len(resp.json()) > 0:
+            # Actualizar
+            resp = requests.patch(
+                f"{SUPABASE_URL}/rest/v1/precios",
+                headers=HEADERS,
+                params={"servicio": f"eq.{servicio}"},
+                json={"precio": precio}
+            )
+        else:
+            # Insertar
+            resp = requests.post(
+                f"{SUPABASE_URL}/rest/v1/precios",
+                headers=HEADERS,
+                json={"servicio": servicio, "precio": precio}
+            )
+        return resp.status_code in (200, 201, 204)
+    except requests.exceptions.RequestException:
+        return False
+
+
 #  ESTADO DE SESION 
 
 if "pantalla" not in st.session_state:
@@ -831,15 +881,27 @@ elif st.session_state.pantalla == "agendar":
             st.warning(f"{barbero} no tiene horas disponibles el {fecha_str}.")
         else:
             hora = st.selectbox("Hora de la cita", horas_libres)
-            servicio = st.selectbox("Servicio", [
-                "corte",
-                "barba",
-                "cejas",
-                "corte+barba",
-                "corte+cejas",
-                "corte+barba+cejas",
-                "otros"
-            ])
+
+            # Cargar precios desde Supabase y mostrarlos junto al servicio
+            precios_dict = get_precios()
+            servicio = st.selectbox(
+                "Servicio",
+                SERVICIOS,
+                format_func=lambda s: (
+                    f"{s} — ${precios_dict[s]:,}".replace(",", ".")
+                    if precios_dict.get(s) else s
+                )
+            )
+
+            # Mostrar precio destacado del servicio elegido
+            precio_sel = precios_dict.get(servicio, 0)
+            if precio_sel > 0:
+                precio_fmt = f"${precio_sel:,}".replace(",", ".")
+                st.markdown(
+                    f"<p style='color:#c9a84c; font-size:1.2em; margin-top:0.5rem;'>"
+                    f"Precio: <b>{precio_fmt}</b></p>",
+                    unsafe_allow_html=True
+                )
 
             if st.button("CONFIRMAR RESERVA"):
                 if cedula.strip() == "" or not cedula.strip().isdigit():
@@ -979,8 +1041,8 @@ elif st.session_state.pantalla == "admin":
             else:
                 st.error("Clave incorrecta.")
     else:
-        # Selector de seccion: Citas o Barberos
-        sec1, sec2 = st.columns(2)
+        # Selector de seccion: Citas, Barberos o Precios
+        sec1, sec2, sec3 = st.columns(3)
         with sec1:
             if st.button("CITAS", key="adm_sec_citas"):
                 st.session_state.admin_seccion = "citas"
@@ -988,6 +1050,10 @@ elif st.session_state.pantalla == "admin":
         with sec2:
             if st.button("BARBEROS", key="adm_sec_barberos"):
                 st.session_state.admin_seccion = "barberos"
+                st.rerun()
+        with sec3:
+            if st.button("PRECIOS", key="adm_sec_precios"):
+                st.session_state.admin_seccion = "precios"
                 st.rerun()
         st.markdown('<hr class="separador">', unsafe_allow_html=True)
 
@@ -1027,7 +1093,7 @@ elif st.session_state.pantalla == "admin":
             else:
                 st.warning("Ninguna cita confirmada aun.")
 
-        else:
+        elif st.session_state.admin_seccion == "barberos":
             # ===== GESTION DE BARBEROS =====
             st.markdown("<h3>GESTION DE BARBEROS</h3>", unsafe_allow_html=True)
             barberos = get_barberos()
@@ -1106,6 +1172,39 @@ elif st.session_state.pantalla == "admin":
                         if st.button("Quitar", key=f"del_{b['id']}"):
                             eliminar_barbero(b["id"])
                             st.rerun()
+
+        else:
+            # ===== GESTION DE PRECIOS =====
+            st.markdown("<h3>GESTION DE PRECIOS</h3>", unsafe_allow_html=True)
+            st.markdown(
+                "<p style='color:#e8d5a3;'>Edita el precio de cada servicio. "
+                "Estos precios se mostraran al agendar una cita.</p>",
+                unsafe_allow_html=True
+            )
+
+            precios_actuales = get_precios()
+
+            for serv in SERVICIOS:
+                precio_actual = int(precios_actuales.get(serv, 0))
+                c1, c2, c3 = st.columns([2, 2, 1])
+                with c1:
+                    st.markdown(f"<div style='padding-top:0.5rem;'><b>{serv}</b></div>", unsafe_allow_html=True)
+                with c2:
+                    nuevo_precio = st.number_input(
+                        f"Precio {serv}",
+                        min_value=0,
+                        step=1000,
+                        value=precio_actual,
+                        key=f"precio_{serv}",
+                        label_visibility="collapsed"
+                    )
+                with c3:
+                    if st.button("Guardar", key=f"savep_{serv}"):
+                        if set_precio(serv, int(nuevo_precio)):
+                            st.success(f"Precio de '{serv}' actualizado.")
+                            st.rerun()
+                        else:
+                            st.error("Error al guardar el precio.")
 
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("← VOLVER AL MENU"):
