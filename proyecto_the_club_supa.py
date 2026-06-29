@@ -1,6 +1,18 @@
 import streamlit as st
 import requests
-from datetime import datetime, date
+from datetime import datetime, date, timedelta, timezone
+
+# Colombia es UTC-5 (sin horario de verano). Streamlit Cloud corre en UTC,
+# por eso forzamos la zona horaria de Colombia para fechas y horas.
+TZ_COLOMBIA = timezone(timedelta(hours=-5))
+
+def ahora_co():
+    """Fecha y hora actual en Colombia (datetime sin tzinfo, ya ajustado a -5)."""
+    return datetime.now(TZ_COLOMBIA).replace(tzinfo=None)
+
+def hoy_co():
+    """Fecha de hoy en Colombia."""
+    return ahora_co().date()
 
 # ============================================================
 #   BARBERIA THE CLUB - INTERFAZ STREAMLIT
@@ -388,7 +400,7 @@ def confirmar_asistencia(cedula, fecha, hora):
         # Verificar que falten 5 horas o menos
         dia, mes, anio = fecha.split("/")
         hora_cita = datetime(int(anio), int(mes), int(dia), int(hora), 0, 0)
-        ahora = datetime.now()
+        ahora = ahora_co()
         diferencia_horas = (hora_cita - ahora).total_seconds() / 3600
 
         if diferencia_horas > 5:
@@ -399,7 +411,7 @@ def confirmar_asistencia(cedula, fecha, hora):
             return False, "Esta cita ya paso."
 
         # Guardar confirmacion
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = ahora_co().strftime("%Y-%m-%d %H:%M:%S")
         resp3 = requests.post(
             f"{SUPABASE_URL}/rest/v1/confirmados",
             headers=HEADERS,
@@ -975,7 +987,7 @@ def confirmar_asistencia_manicure(cedula, fecha, hora):
 
         dia, mes, anio = fecha.split("/")
         hora_cita = datetime(int(anio), int(mes), int(dia), int(hora), 0, 0)
-        ahora = datetime.now()
+        ahora = ahora_co()
         diferencia_horas = (hora_cita - ahora).total_seconds() / 3600
 
         if diferencia_horas > 5:
@@ -984,7 +996,7 @@ def confirmar_asistencia_manicure(cedula, fecha, hora):
         if diferencia_horas < 0:
             return False, "Esta cita ya paso."
 
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = ahora_co().strftime("%Y-%m-%d %H:%M:%S")
         resp3 = requests.post(
             f"{SUPABASE_URL}/rest/v1/confirmados_manicure",
             headers=HEADERS,
@@ -1119,7 +1131,7 @@ elif st.session_state.pantalla == "registro":
             "Fecha de nacimiento",
             value=date(2000, 1, 1),
             min_value=date(1920, 1, 1),
-            max_value=date.today(),
+            max_value=hoy_co(),
             format="DD/MM/YYYY"
         )
         enviar   = st.form_submit_button("CONFIRMAR REGISTRO")
@@ -1260,8 +1272,8 @@ elif st.session_state.pantalla == "agendar":
 
     fecha_obj = st.date_input(
         "Fecha de la cita",
-        value=date.today(),
-        min_value=date.today(),
+        value=hoy_co(),
+        min_value=hoy_co(),
         format="DD/MM/YYYY"
     )
     fecha_str = fecha_obj.strftime("%d/%m/%Y")
@@ -1466,8 +1478,8 @@ elif st.session_state.pantalla == "agendar_manicure":
 
     fecha_obj = st.date_input(
         "Fecha de la cita",
-        value=date.today(),
-        min_value=date.today(),
+        value=hoy_co(),
+        min_value=hoy_co(),
         format="DD/MM/YYYY",
         key="fecha_manicure"
     )
@@ -1540,7 +1552,7 @@ elif st.session_state.pantalla == "ver_dia_manicure":
 
     fecha_obj = st.date_input(
         "Fecha a consultar",
-        value=date.today(),
+        value=hoy_co(),
         format="DD/MM/YYYY",
         key="fecha_ver_m"
     )
@@ -1687,7 +1699,7 @@ elif st.session_state.pantalla == "admin":
 
             # --- TAB 1: Confirmar asistencia (vino / no vino) ---
             with tab1:
-                fecha_asis = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY", key="fecha_asis")
+                fecha_asis = st.date_input("Fecha", value=hoy_co(), format="DD/MM/YYYY", key="fecha_asis")
                 fecha_asis_str = fecha_asis.strftime("%d/%m/%Y")
                 estados = get_asistencia(fecha_asis_str)
                 if not barberos:
@@ -1767,7 +1779,7 @@ elif st.session_state.pantalla == "admin":
 
             # --- TAB 1: Asistencia ---
             with mtab1:
-                fecha_asis_m = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY", key="fecha_asis_m")
+                fecha_asis_m = st.date_input("Fecha", value=hoy_co(), format="DD/MM/YYYY", key="fecha_asis_m")
                 fecha_asis_m_str = fecha_asis_m.strftime("%d/%m/%Y")
                 estados_m = get_asistencia_manicuristas(fecha_asis_m_str)
                 if not manicuristas:
