@@ -665,6 +665,297 @@ def set_precio(servicio, precio):
         return False
 
 
+# ── FUNCIONES DE MANICURE / MANICURISTAS ─────────────────────
+
+SERVICIOS_MANICURE = ["manicure", "pedicure", "manicure+pedicure", "semipermanente", "esmaltado", "decoracion", "manicure otros"]
+
+SOPORTE_WHATSAPP = "573124749712"  # numero de soporte (sin + ni espacios)
+
+
+def get_manicuristas(solo_activos=False):
+    """Retorna lista de manicuristas (dicts). Si solo_activos=True, solo activos."""
+    resultados = []
+    try:
+        params = {"order": "nombre.asc"}
+        if solo_activos:
+            params["activo"] = "eq.true"
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/manicuristas",
+            headers=HEADERS,
+            params=params
+        )
+        if resp.status_code == 200:
+            resultados = resp.json()
+    except requests.exceptions.RequestException:
+        pass
+    return resultados
+
+
+def agregar_manicurista(nombre):
+    if nombre.strip() == "":
+        return False, "El nombre del manicurista no puede estar vacio."
+    if not nombre.replace(" ", "").isalpha():
+        return False, "El nombre debe contener solo letras."
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/manicuristas",
+            headers=HEADERS,
+            params={"nombre": f"eq.{nombre}"}
+        )
+        if resp.status_code == 200 and len(resp.json()) > 0:
+            return False, "Ese manicurista ya existe."
+        resp = requests.post(
+            f"{SUPABASE_URL}/rest/v1/manicuristas",
+            headers=HEADERS,
+            json={"nombre": nombre, "activo": True, "dias_descanso": ""}
+        )
+        if resp.status_code in (200, 201):
+            return True, f"Manicurista {nombre} agregado."
+        return False, "Error al agregar el manicurista."
+    except requests.exceptions.RequestException:
+        return False, "Error de conexion con la base de datos."
+
+
+def eliminar_manicurista(manicurista_id):
+    try:
+        resp = requests.delete(
+            f"{SUPABASE_URL}/rest/v1/manicuristas",
+            headers=HEADERS,
+            params={"id": f"eq.{manicurista_id}"}
+        )
+        return resp.status_code in (200, 204)
+    except requests.exceptions.RequestException:
+        return False
+
+
+def set_activo_manicurista(manicurista_id, activo):
+    try:
+        resp = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/manicuristas",
+            headers=HEADERS,
+            params={"id": f"eq.{manicurista_id}"},
+            json={"activo": activo}
+        )
+        return resp.status_code in (200, 204)
+    except requests.exceptions.RequestException:
+        return False
+
+
+def set_dias_descanso_manicurista(manicurista_id, dias_lista):
+    dias_str = ",".join(dias_lista)
+    try:
+        resp = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/manicuristas",
+            headers=HEADERS,
+            params={"id": f"eq.{manicurista_id}"},
+            json={"dias_descanso": dias_str}
+        )
+        return resp.status_code in (200, 204)
+    except requests.exceptions.RequestException:
+        return False
+
+
+def horas_ocupadas_manicurista(manicurista, fecha):
+    ocupadas = set()
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/citas_manicure",
+            headers=HEADERS,
+            params={"fecha": f"eq.{fecha}", "manicurista": f"eq.{manicurista}"}
+        )
+        if resp.status_code == 200:
+            for row in resp.json():
+                ocupadas.add(str(row["hora"]))
+    except requests.exceptions.RequestException:
+        pass
+    return ocupadas
+
+
+def marcar_asistencia_manicurista(manicurista, fecha, presente):
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/asistencia_manicuristas",
+            headers=HEADERS,
+            params={"manicurista": f"eq.{manicurista}", "fecha": f"eq.{fecha}"}
+        )
+        if resp.status_code == 200 and len(resp.json()) > 0:
+            reg_id = resp.json()[0]["id"]
+            resp2 = requests.patch(
+                f"{SUPABASE_URL}/rest/v1/asistencia_manicuristas",
+                headers=HEADERS,
+                params={"id": f"eq.{reg_id}"},
+                json={"presente": presente}
+            )
+            return resp2.status_code in (200, 204)
+        resp2 = requests.post(
+            f"{SUPABASE_URL}/rest/v1/asistencia_manicuristas",
+            headers=HEADERS,
+            json={"manicurista": manicurista, "fecha": fecha, "presente": presente}
+        )
+        return resp2.status_code in (200, 201)
+    except requests.exceptions.RequestException:
+        return False
+
+
+def get_asistencia_manicuristas(fecha):
+    estados = {}
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/asistencia_manicuristas",
+            headers=HEADERS,
+            params={"fecha": f"eq.{fecha}"}
+        )
+        if resp.status_code == 200:
+            for row in resp.json():
+                estados[row["manicurista"]] = row["presente"]
+    except requests.exceptions.RequestException:
+        pass
+    return estados
+
+
+def agendar_cita_manicure(cedula, fecha, hora, manicurista, servicio):
+    nombre_cliente = buscar_cliente(cedula)
+    if nombre_cliente is None:
+        return False, "Cedula no encontrada. El cliente no esta registrado."
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/citas_manicure",
+            headers=HEADERS,
+            params={"fecha": f"eq.{fecha}", "hora": f"eq.{hora}", "manicurista": f"eq.{manicurista}"}
+        )
+        if resp.status_code == 200 and len(resp.json()) > 0:
+            return False, f"{manicurista} ya tiene una cita a las {hora}:00 del {fecha}."
+        resp = requests.post(
+            f"{SUPABASE_URL}/rest/v1/citas_manicure",
+            headers=HEADERS,
+            json={"cedula": cedula, "fecha": fecha, "hora": hora, "manicurista": manicurista, "servicio": servicio}
+        )
+        if resp.status_code in (200, 201):
+            return True, f"Cita de manicure agendada para {nombre_cliente} el {fecha} a las {hora}:00."
+        return False, "Error al agendar la cita. Intenta de nuevo."
+    except requests.exceptions.RequestException:
+        return False, "Error de conexion con la base de datos."
+
+
+def ver_citas_manicure_del_dia(fecha):
+    resultados = []
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/citas_manicure",
+            headers=HEADERS,
+            params={"fecha": f"eq.{fecha}"}
+        )
+        if resp.status_code == 200:
+            for row in resp.json():
+                nombre = buscar_cliente(row["cedula"]) or "Desconocido"
+                resultados.append({
+                    "Hora": row["hora"] + ":00",
+                    "Cliente": nombre,
+                    "Cedula": row["cedula"],
+                    "Manicurista": row["manicurista"],
+                    "Servicio": row["servicio"]
+                })
+    except requests.exceptions.RequestException:
+        pass
+    return resultados
+
+
+def esta_confirmada_manicure(cedula, fecha, hora):
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/confirmados_manicure",
+            headers=HEADERS,
+            params={"cedula": f"eq.{cedula}", "fecha": f"eq.{fecha}", "hora": f"eq.{hora}"}
+        )
+        if resp.status_code == 200 and len(resp.json()) > 0:
+            return True
+    except requests.exceptions.RequestException:
+        pass
+    return False
+
+
+def confirmar_asistencia_manicure(cedula, fecha, hora):
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/citas_manicure",
+            headers=HEADERS,
+            params={"cedula": f"eq.{cedula}", "fecha": f"eq.{fecha}", "hora": f"eq.{hora}"}
+        )
+        if resp.status_code != 200 or len(resp.json()) == 0:
+            return False, "No se encontro una cita de manicure con esos datos."
+
+        resp2 = requests.get(
+            f"{SUPABASE_URL}/rest/v1/confirmados_manicure",
+            headers=HEADERS,
+            params={"cedula": f"eq.{cedula}", "fecha": f"eq.{fecha}", "hora": f"eq.{hora}"}
+        )
+        if resp2.status_code == 200 and len(resp2.json()) > 0:
+            return False, "Esta cita ya fue confirmada anteriormente."
+
+        dia, mes, anio = fecha.split("/")
+        hora_cita = datetime(int(anio), int(mes), int(dia), int(hora), 0, 0)
+        ahora = datetime.now()
+        diferencia_horas = (hora_cita - ahora).total_seconds() / 3600
+
+        if diferencia_horas > 5:
+            horas_restantes = round(diferencia_horas, 1)
+            return False, f"Solo puedes confirmar cuando falten 5 horas o menos. Faltan {horas_restantes} horas."
+        if diferencia_horas < 0:
+            return False, "Esta cita ya paso."
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        resp3 = requests.post(
+            f"{SUPABASE_URL}/rest/v1/confirmados_manicure",
+            headers=HEADERS,
+            json={"cedula": cedula, "fecha": fecha, "hora": hora, "timestamp_confirmacion": timestamp}
+        )
+        if resp3.status_code in (200, 201):
+            return True, "Asistencia confirmada correctamente."
+        return False, "Error al confirmar. Intenta de nuevo."
+    except requests.exceptions.RequestException:
+        return False, "Error de conexion con la base de datos."
+
+
+def get_citas_manicure_confirmadas():
+    resultados = []
+    try:
+        resp = requests.get(f"{SUPABASE_URL}/rest/v1/confirmados_manicure", headers=HEADERS)
+        if resp.status_code == 200:
+            for row in resp.json():
+                nombre = buscar_cliente(row["cedula"]) or "Desconocido"
+                resultados.append({
+                    "Cliente": nombre,
+                    "Cedula": row["cedula"],
+                    "Fecha": row["fecha"],
+                    "Hora": row["hora"] + ":00",
+                    "Confirmado a las": row["timestamp_confirmacion"]
+                })
+    except requests.exceptions.RequestException:
+        pass
+    return resultados
+
+
+def get_citas_manicure_sin_confirmar():
+    resultados = []
+    try:
+        resp = requests.get(f"{SUPABASE_URL}/rest/v1/citas_manicure", headers=HEADERS)
+        if resp.status_code == 200:
+            for row in resp.json():
+                if not esta_confirmada_manicure(row["cedula"], row["fecha"], row["hora"]):
+                    nombre = buscar_cliente(row["cedula"]) or "Desconocido"
+                    resultados.append({
+                        "Cliente": nombre,
+                        "Cedula": row["cedula"],
+                        "Fecha": row["fecha"],
+                        "Hora": row["hora"] + ":00",
+                        "Manicurista": row["manicurista"],
+                        "Servicio": row["servicio"]
+                    })
+    except requests.exceptions.RequestException:
+        pass
+    return resultados
+
+
 #  ESTADO DE SESION 
 
 if "pantalla" not in st.session_state:
@@ -771,18 +1062,24 @@ elif st.session_state.pantalla == "menu":
         st.markdown(f'''<div style="text-align:center">
             <img src="data:image/png;base64,{ESCUDO_BUSCAR}" style="width:100%;border-radius:12px;cursor:pointer">
         </div>''', unsafe_allow_html=True)
-        if st.button("BUSCAR POR CLIENTE", key="btn_buscar"):
-            ir_a("buscar")
+        if st.button("CITAS MANICURE", key="btn_manicure"):
+            ir_a("menu_manicure")
             st.rerun()
 
-    # Fila 2: Confirmar asistencia (centrado, ancho medio)
+    # Fila 2: Confirmar asistencia y Soporte WhatsApp
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<hr class="separador">', unsafe_allow_html=True)
-    col_x, col_y, col_z = st.columns([1, 2, 1])
-    with col_y:
+    col_conf, col_sop = st.columns(2)
+    with col_conf:
         if st.button("CONFIRMAR ASISTENCIA", key="btn_confirmar"):
             ir_a("confirmar")
             st.rerun()
+    with col_sop:
+        st.link_button(
+            "SOPORTE WHATSAPP",
+            f"https://wa.me/{SOPORTE_WHATSAPP}?text=Hola,%20necesito%20ayuda%20con%20The%20Club%20Barbershop",
+            use_container_width=True
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<hr class="separador">', unsafe_allow_html=True)
@@ -1019,6 +1316,180 @@ elif st.session_state.pantalla == "confirmar":
 
 
 
+#  SUB-MENU: CITAS MANICURE
+
+elif st.session_state.pantalla == "menu_manicure":
+    set_fondo(FONDO_MADERA, "jpeg")
+    st.markdown('<h1>CITAS MANICURE</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="subtitulo">Seleccione una opcion</p>', unsafe_allow_html=True)
+    st.markdown('<hr class="separador">', unsafe_allow_html=True)
+
+    m1, m2, m3 = st.columns(3)
+    with m1:
+        if st.button("AGENDAR CITA", key="btn_agendar_m"):
+            ir_a("agendar_manicure")
+            st.rerun()
+    with m2:
+        if st.button("VER CITAS DEL DIA", key="btn_ver_m"):
+            ir_a("ver_dia_manicure")
+            st.rerun()
+    with m3:
+        if st.button("CONFIRMAR ASISTENCIA", key="btn_confirmar_m"):
+            ir_a("confirmar_manicure")
+            st.rerun()
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("← VOLVER AL MENU"):
+        ir_a("menu")
+        st.rerun()
+
+
+#  PANTALLA: AGENDAR CITA MANICURE
+
+elif st.session_state.pantalla == "agendar_manicure":
+    set_fondo(FONDO_PATRON, "png")
+    st.markdown('<h1>AGENDAR MANICURE</h1>', unsafe_allow_html=True)
+    st.markdown('<hr class="separador">', unsafe_allow_html=True)
+
+    cedula = st.text_input("Cedula del cliente")
+
+    fecha_obj = st.date_input(
+        "Fecha de la cita",
+        value=date.today(),
+        min_value=date.today(),
+        format="DD/MM/YYYY",
+        key="fecha_manicure"
+    )
+    fecha_str = fecha_obj.strftime("%d/%m/%Y")
+    dia_semana = DIAS_SEMANA[fecha_obj.weekday()]
+
+    manicuristas_activas = get_manicuristas(solo_activos=True)
+    manicuristas_disponibles = [
+        m for m in manicuristas_activas
+        if dia_semana not in (m.get("dias_descanso") or "").split(",")
+    ]
+
+    if not manicuristas_activas:
+        st.warning("No hay manicuristas registradas. Agregalas en Administracion -> Manicuristas.")
+    elif not manicuristas_disponibles:
+        st.warning(f"Ninguna manicurista trabaja el {dia_semana} ({fecha_str}). Revisa los dias de descanso en Administracion.")
+    else:
+        manicurista = st.selectbox("Manicurista", [m["nombre"] for m in manicuristas_disponibles])
+
+        ocupadas = horas_ocupadas_manicurista(manicurista, fecha_str)
+        horas_libres = [str(h) for h in range(8, 21) if str(h) not in ocupadas]
+
+        if not horas_libres:
+            st.warning(f"{manicurista} no tiene horas disponibles el {fecha_str}.")
+        else:
+            hora = st.selectbox("Hora de la cita", horas_libres, key="hora_manicure")
+
+            precios_dict = get_precios()
+            servicio = st.selectbox(
+                "Servicio",
+                SERVICIOS_MANICURE,
+                format_func=lambda s: (
+                    f"{s} — ${precios_dict[s]:,}".replace(",", ".")
+                    if precios_dict.get(s) else s
+                ),
+                key="serv_manicure"
+            )
+
+            precio_sel = precios_dict.get(servicio, 0)
+            if precio_sel > 0:
+                precio_fmt = f"${precio_sel:,}".replace(",", ".")
+                st.markdown(
+                    f"<p style='color:#c9a84c; font-size:1.2em; margin-top:0.5rem;'>"
+                    f"Precio: <b>{precio_fmt}</b></p>",
+                    unsafe_allow_html=True
+                )
+
+            if st.button("CONFIRMAR RESERVA", key="btn_reservar_m"):
+                if cedula.strip() == "" or not cedula.strip().isdigit():
+                    st.error("Ingrese una cedula valida.")
+                else:
+                    ok, msg = agendar_cita_manicure(cedula.strip(), fecha_str, hora, manicurista, servicio)
+                    if ok:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("← VOLVER", key="back_agendar_m"):
+        ir_a("menu_manicure")
+        st.rerun()
+
+
+#  PANTALLA: VER CITAS MANICURE DEL DIA
+
+elif st.session_state.pantalla == "ver_dia_manicure":
+    set_fondo(FONDO_PATRON, "png")
+    st.markdown('<h1>CITAS MANICURE DEL DIA</h1>', unsafe_allow_html=True)
+    st.markdown('<hr class="separador">', unsafe_allow_html=True)
+
+    fecha_obj = st.date_input(
+        "Fecha a consultar",
+        value=date.today(),
+        format="DD/MM/YYYY",
+        key="fecha_ver_m"
+    )
+    fecha = fecha_obj.strftime("%d/%m/%Y")
+
+    if st.button("VER CITAS", key="btn_ver_m_d"):
+        resultados = ver_citas_manicure_del_dia(fecha)
+        if resultados:
+            st.success(f"{len(resultados)} cita(s) para el {fecha}.")
+            for r in resultados:
+                st.markdown(f"""
+                <div class="resultado-card">
+                    <b>{r['Hora']}</b> &nbsp;|&nbsp;
+                    <b>{r['Cliente']}</b> ({r['Cedula']}) &nbsp;|&nbsp;
+                    {r['Manicurista']} &nbsp;|&nbsp;
+                    {r['Servicio']}
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.warning(f"No hay citas de manicure para el {fecha}.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("← VOLVER", key="back_ver_m"):
+        ir_a("menu_manicure")
+        st.rerun()
+
+
+#  PANTALLA: CONFIRMAR ASISTENCIA MANICURE
+
+elif st.session_state.pantalla == "confirmar_manicure":
+    set_fondo(FONDO_PATRON, "png")
+    st.markdown('<h1>CONFIRMAR ASISTENCIA</h1>', unsafe_allow_html=True)
+    st.markdown('<hr class="separador">', unsafe_allow_html=True)
+    st.markdown("<p style='color:#e8d5a3;'>Puedes confirmar tu asistencia cuando falten <b style='color:#c9a84c;'>5 horas o menos</b> para tu cita.</p>", unsafe_allow_html=True)
+
+    with st.form("form_confirmar_m"):
+        cedula = st.text_input("Cedula del cliente")
+        fecha  = st.text_input("Fecha de la cita (DD/MM/AAAA)")
+        hora   = st.selectbox("Hora de la cita", [str(h) for h in range(8, 21)])
+        enviar = st.form_submit_button("CONFIRMAR MI ASISTENCIA")
+
+    if enviar:
+        if not cedula.strip().isdigit() or cedula.strip() == "":
+            st.error("Ingrese una cedula valida.")
+        elif not fecha_valida(fecha.strip()):
+            st.error("Fecha invalida. Use el formato DD/MM/AAAA.")
+        else:
+            ok, msg = confirmar_asistencia_manicure(cedula.strip(), fecha.strip(), hora)
+            if ok:
+                st.success(msg)
+            else:
+                st.error(msg)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("← VOLVER", key="back_conf_m"):
+        ir_a("menu_manicure")
+        st.rerun()
+
+
+
 #  PANTALLA: ADMINISTRACION
 
 elif st.session_state.pantalla == "admin":
@@ -1041,8 +1512,8 @@ elif st.session_state.pantalla == "admin":
             else:
                 st.error("Clave incorrecta.")
     else:
-        # Selector de seccion: Citas, Barberos o Precios
-        sec1, sec2, sec3 = st.columns(3)
+        # Selector de seccion: Citas, Barberos, Manicuristas o Precios
+        sec1, sec2, sec3, sec4 = st.columns(4)
         with sec1:
             if st.button("CITAS", key="adm_sec_citas"):
                 st.session_state.admin_seccion = "citas"
@@ -1052,6 +1523,10 @@ elif st.session_state.pantalla == "admin":
                 st.session_state.admin_seccion = "barberos"
                 st.rerun()
         with sec3:
+            if st.button("MANICURISTAS", key="adm_sec_manicuristas"):
+                st.session_state.admin_seccion = "manicuristas"
+                st.rerun()
+        with sec4:
             if st.button("PRECIOS", key="adm_sec_precios"):
                 st.session_state.admin_seccion = "precios"
                 st.rerun()
@@ -1173,6 +1648,86 @@ elif st.session_state.pantalla == "admin":
                             eliminar_barbero(b["id"])
                             st.rerun()
 
+        elif st.session_state.admin_seccion == "manicuristas":
+            # ===== GESTION DE MANICURISTAS =====
+            st.markdown("<h3>GESTION DE MANICURISTAS</h3>", unsafe_allow_html=True)
+            manicuristas = get_manicuristas()
+            mtab1, mtab2, mtab3 = st.tabs(["Asistencia", "Dias de descanso", "Agregar / Quitar"])
+
+            # --- TAB 1: Asistencia ---
+            with mtab1:
+                fecha_asis_m = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY", key="fecha_asis_m")
+                fecha_asis_m_str = fecha_asis_m.strftime("%d/%m/%Y")
+                estados_m = get_asistencia_manicuristas(fecha_asis_m_str)
+                if not manicuristas:
+                    st.info("No hay manicuristas registradas.")
+                for m in manicuristas:
+                    nombre = m["nombre"]
+                    estado = estados_m.get(nombre)
+                    icono = "✅" if estado is True else ("❌" if estado is False else "—")
+                    c1, c2, c3 = st.columns([2, 1, 1])
+                    with c1:
+                        st.markdown(f"**{nombre}** &nbsp; {icono}")
+                    with c2:
+                        if st.button("Vino", key=f"vino_m_{m['id']}"):
+                            marcar_asistencia_manicurista(nombre, fecha_asis_m_str, True)
+                            st.rerun()
+                    with c3:
+                        if st.button("No vino", key=f"novino_m_{m['id']}"):
+                            marcar_asistencia_manicurista(nombre, fecha_asis_m_str, False)
+                            st.rerun()
+
+            # --- TAB 2: Dias de descanso ---
+            with mtab2:
+                st.markdown("<p style='color:#e8d5a3;'>Marca los dias que NO trabaja cada manicurista.</p>", unsafe_allow_html=True)
+                if not manicuristas:
+                    st.info("No hay manicuristas registradas.")
+                for m in manicuristas:
+                    nombre = m["nombre"]
+                    actuales = [d for d in (m.get("dias_descanso") or "").split(",") if d]
+                    seleccion = st.multiselect(
+                        f"{nombre} descansa:",
+                        DIAS_SEMANA,
+                        default=actuales,
+                        key=f"desc_m_{m['id']}"
+                    )
+                    if st.button(f"Guardar dias de {nombre}", key=f"savedesc_m_{m['id']}"):
+                        if set_dias_descanso_manicurista(m["id"], seleccion):
+                            st.success(f"Dias de descanso de {nombre} actualizados.")
+                            st.rerun()
+                        else:
+                            st.error("Error al guardar.")
+
+            # --- TAB 3: Agregar / Quitar ---
+            with mtab3:
+                nueva = st.text_input("Nombre de la nueva manicurista", key="nueva_manicurista")
+                if st.button("AGREGAR MANICURISTA", key="btn_add_manicurista"):
+                    ok, msg = agregar_manicurista(nueva.strip())
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+                st.markdown('<hr class="separador">', unsafe_allow_html=True)
+                st.markdown("<p style='color:#e8d5a3;'>Manicuristas actuales:</p>", unsafe_allow_html=True)
+                if not manicuristas:
+                    st.info("No hay manicuristas registradas.")
+                for m in manicuristas:
+                    estado_txt = "Activa" if m.get("activo") else "Inactiva"
+                    c1, c2, c3 = st.columns([2, 1, 1])
+                    with c1:
+                        st.markdown(f"**{m['nombre']}** — {estado_txt}")
+                    with c2:
+                        label = "Activar" if not m.get("activo") else "Desactivar"
+                        if st.button(label, key=f"act_m_{m['id']}"):
+                            set_activo_manicurista(m["id"], not m.get("activo"))
+                            st.rerun()
+                    with c3:
+                        if st.button("Quitar", key=f"del_m_{m['id']}"):
+                            eliminar_manicurista(m["id"])
+                            st.rerun()
+
         else:
             # ===== GESTION DE PRECIOS =====
             st.markdown("<h3>GESTION DE PRECIOS</h3>", unsafe_allow_html=True)
@@ -1184,7 +1739,7 @@ elif st.session_state.pantalla == "admin":
 
             precios_actuales = get_precios()
 
-            for serv in SERVICIOS:
+            def _editor_precio(serv, prefix):
                 precio_actual = int(precios_actuales.get(serv, 0))
                 c1, c2, c3 = st.columns([2, 2, 1])
                 with c1:
@@ -1195,16 +1750,25 @@ elif st.session_state.pantalla == "admin":
                         min_value=0,
                         step=1000,
                         value=precio_actual,
-                        key=f"precio_{serv}",
+                        key=f"{prefix}_{serv}",
                         label_visibility="collapsed"
                     )
                 with c3:
-                    if st.button("Guardar", key=f"savep_{serv}"):
+                    if st.button("Guardar", key=f"savep_{prefix}_{serv}"):
                         if set_precio(serv, int(nuevo_precio)):
                             st.success(f"Precio de '{serv}' actualizado.")
                             st.rerun()
                         else:
                             st.error("Error al guardar el precio.")
+
+            st.markdown("<h4 style='color:#c9a84c;'>BARBERIA</h4>", unsafe_allow_html=True)
+            for serv in SERVICIOS:
+                _editor_precio(serv, "precio_b")
+
+            st.markdown('<hr class="separador">', unsafe_allow_html=True)
+            st.markdown("<h4 style='color:#c9a84c;'>MANICURE</h4>", unsafe_allow_html=True)
+            for serv in SERVICIOS_MANICURE:
+                _editor_precio(serv, "precio_m")
 
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("← VOLVER AL MENU"):
