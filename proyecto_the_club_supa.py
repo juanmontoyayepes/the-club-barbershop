@@ -206,14 +206,16 @@ def set_fondo(imagen_b64, tipo="jpg"):
 
 
 # ── CONEXION A SUPABASE (base de datos en la nube) ───────────
+# Las credenciales se leen desde Streamlit Secrets (Settings → Secrets en
+# Streamlit Cloud). Así NO quedan expuestas en el repo público de GitHub.
 
-SUPABASE_URL = "https://kacltyzlixouzuzzaqov.supabase.co"
-SUPABASE_KEY = "sb_publishable_dr7vWyfABYoO69pU-vbneg_iHOIXvMV"
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
 # --- Twilio WhatsApp ---
-TWILIO_SID   = "ACcab3c82b79c48dd760dc46dadb813515"
-TWILIO_TOKEN = "760b372f3f0bd975ded31097c9882d25"
-TWILIO_WA    = "whatsapp:+14155238886"   # número sandbox de Twilio
+TWILIO_SID   = st.secrets["TWILIO_SID"]
+TWILIO_TOKEN = st.secrets["TWILIO_TOKEN"]
+TWILIO_WA    = st.secrets["TWILIO_WA"]   # número sandbox de Twilio
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
