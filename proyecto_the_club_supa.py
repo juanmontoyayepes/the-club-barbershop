@@ -198,6 +198,11 @@ def set_fondo(imagen_b64, tipo="jpg"):
 SUPABASE_URL = "https://kacltyzlixouzuzzaqov.supabase.co"
 SUPABASE_KEY = "sb_publishable_dr7vWyfABYoO69pU-vbneg_iHOIXvMV"
 
+# --- Twilio WhatsApp ---
+TWILIO_SID   = "ACcab3c82b79c48dd760dc46dadb813515"
+TWILIO_TOKEN = "3aaa3c038c1459c3dedf8e1544df2a50"
+TWILIO_WA    = "whatsapp:+14155238886"   # número sandbox de Twilio
+
 HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -401,7 +406,34 @@ def confirmar_asistencia(cedula, fecha, hora):
             json={"cedula": cedula, "fecha": fecha, "hora": hora, "timestamp_confirmacion": timestamp}
         )
         if resp3.status_code in (200, 201):
-            return True, "Asistencia confirmada correctamente."
+            # Enviar WhatsApp al cliente
+            try:
+                cita = resp.json()[0]
+                peluquero = cita.get("peluquero", "tu barbero")
+                servicio  = cita.get("servicio", "")
+                rc = requests.get(
+                    f"{SUPABASE_URL}/rest/v1/clientes",
+                    headers=HEADERS,
+                    params={"cedula": f"eq.{cedula}"}
+                )
+                if rc.status_code == 200 and len(rc.json()) > 0:
+                    cliente = rc.json()[0]
+                    nombre_cliente = cliente.get("nombre", "Cliente")
+                    telefono = cliente.get("telefono", "")
+                    if telefono:
+                        msg_cliente = (
+                            f"✅ *The Club Barbershop*\n"
+                            f"Hola {nombre_cliente}, tu cita ha sido confirmada.\n"
+                            f"📅 Fecha: {fecha}\n"
+                            f"🕐 Hora: {hora}:00\n"
+                            f"💈 Barbero: {peluquero}\n"
+                            f"✂️ Servicio: {servicio}\n"
+                            f"¡Te esperamos!"
+                        )
+                        enviar_whatsapp(telefono, msg_cliente)
+            except Exception:
+                pass
+            return True, "Asistencia confirmada. ¡Se envió un WhatsApp de confirmación!"
         return False, "Error al confirmar. Intenta de nuevo."
 
     except requests.exceptions.RequestException:
@@ -618,6 +650,27 @@ def get_asistencia(fecha):
 # ── FUNCIONES DE PRECIOS ─────────────────────────────────────
 
 SERVICIOS = ["corte", "barba", "cejas", "corte+barba", "corte+cejas", "corte+barba+cejas", "otros"]
+
+
+def enviar_whatsapp(telefono, mensaje):
+    """
+    Envía un mensaje de WhatsApp vía Twilio.
+    telefono: número con código de país sin + ni espacios, ej. '573001234567'
+    Retorna (True, '') si OK, (False, error) si falla.
+    """
+    try:
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_SID}/Messages.json"
+        data = {
+            "From": TWILIO_WA,
+            "To":   f"whatsapp:+{telefono}",
+            "Body": mensaje,
+        }
+        resp = requests.post(url, data=data, auth=(TWILIO_SID, TWILIO_TOKEN), timeout=10)
+        if resp.status_code in (200, 201):
+            return True, ""
+        return False, resp.json().get("message", "Error Twilio")
+    except Exception as e:
+        return False, str(e)
 
 
 def get_precios():
@@ -910,7 +963,34 @@ def confirmar_asistencia_manicure(cedula, fecha, hora):
             json={"cedula": cedula, "fecha": fecha, "hora": hora, "timestamp_confirmacion": timestamp}
         )
         if resp3.status_code in (200, 201):
-            return True, "Asistencia confirmada correctamente."
+            # Enviar WhatsApp al cliente
+            try:
+                cita = resp.json()[0]
+                manicurista = cita.get("manicurista", "tu manicurista")
+                servicio    = cita.get("servicio", "")
+                rc = requests.get(
+                    f"{SUPABASE_URL}/rest/v1/clientes",
+                    headers=HEADERS,
+                    params={"cedula": f"eq.{cedula}"}
+                )
+                if rc.status_code == 200 and len(rc.json()) > 0:
+                    cliente = rc.json()[0]
+                    nombre_cliente = cliente.get("nombre", "Cliente")
+                    telefono = cliente.get("telefono", "")
+                    if telefono:
+                        msg_cliente = (
+                            f"✅ *The Club Barbershop — Manicure*\n"
+                            f"Hola {nombre_cliente}, tu cita ha sido confirmada.\n"
+                            f"📅 Fecha: {fecha}\n"
+                            f"🕐 Hora: {hora}:00\n"
+                            f"💅 Manicurista: {manicurista}\n"
+                            f"✨ Servicio: {servicio}\n"
+                            f"¡Te esperamos!"
+                        )
+                        enviar_whatsapp(telefono, msg_cliente)
+            except Exception:
+                pass
+            return True, "Asistencia confirmada. ¡Se envió un WhatsApp de confirmación!"
         return False, "Error al confirmar. Intenta de nuevo."
     except requests.exceptions.RequestException:
         return False, "Error de conexion con la base de datos."
