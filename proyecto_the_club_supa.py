@@ -407,6 +407,7 @@ def confirmar_asistencia(cedula, fecha, hora):
         )
         if resp3.status_code in (200, 201):
             # Enviar WhatsApp al cliente
+            wa_ok, wa_err = False, "Sin teléfono registrado."
             try:
                 cita = resp.json()[0]
                 peluquero = cita.get("peluquero", "tu barbero")
@@ -430,10 +431,12 @@ def confirmar_asistencia(cedula, fecha, hora):
                             f"✂️ Servicio: {servicio}\n"
                             f"¡Te esperamos!"
                         )
-                        enviar_whatsapp(telefono, msg_cliente)
-            except Exception:
-                pass
-            return True, "Asistencia confirmada. ¡Se envió un WhatsApp de confirmación!"
+                        wa_ok, wa_err = enviar_whatsapp(telefono, msg_cliente)
+            except Exception as e:
+                wa_err = str(e)
+            if wa_ok:
+                return True, "Asistencia confirmada. ¡WhatsApp enviado al cliente!"
+            return True, f"Asistencia confirmada. (WhatsApp no enviado: {wa_err})"
         return False, "Error al confirmar. Intenta de nuevo."
 
     except requests.exceptions.RequestException:
@@ -652,23 +655,48 @@ def get_asistencia(fecha):
 SERVICIOS = ["corte", "barba", "cejas", "corte+barba", "corte+cejas", "corte+barba+cejas", "otros"]
 
 
+def normalizar_telefono(t):
+    """
+    Normaliza un número colombiano a formato internacional sin '+'.
+    Ejemplos:
+      '3155430286'       -> '573155430286'
+      '+57 315 543 0286' -> '573155430286'
+      '573155430286'     -> '573155430286'
+    """
+    if not t:
+        return ""
+    # Quitar todo lo que no sea dígito
+    limpio = "".join(c for c in str(t) if c.isdigit())
+    # Si tiene 10 dígitos y empieza con 3, es móvil colombiano sin código
+    if len(limpio) == 10 and limpio.startswith("3"):
+        return "57" + limpio
+    return limpio
+
+
 def enviar_whatsapp(telefono, mensaje):
     """
     Envía un mensaje de WhatsApp vía Twilio.
-    telefono: número con código de país sin + ni espacios, ej. '573001234567'
+    telefono: número con o sin código de país (se normaliza automáticamente).
     Retorna (True, '') si OK, (False, error) si falla.
     """
     try:
+        numero = normalizar_telefono(telefono)
+        if not numero:
+            return False, "Teléfono vacío o inválido."
         url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_SID}/Messages.json"
         data = {
             "From": TWILIO_WA,
-            "To":   f"whatsapp:+{telefono}",
+            "To":   f"whatsapp:+{numero}",
             "Body": mensaje,
         }
         resp = requests.post(url, data=data, auth=(TWILIO_SID, TWILIO_TOKEN), timeout=10)
         if resp.status_code in (200, 201):
             return True, ""
-        return False, resp.json().get("message", "Error Twilio")
+        try:
+            err = resp.json().get("message", resp.text)
+        except Exception:
+            err = resp.text
+        return False, f"Twilio {resp.status_code}: {err}"
     except Exception as e:
         return False, str(e)
 
@@ -964,6 +992,7 @@ def confirmar_asistencia_manicure(cedula, fecha, hora):
         )
         if resp3.status_code in (200, 201):
             # Enviar WhatsApp al cliente
+            wa_ok, wa_err = False, "Sin teléfono registrado."
             try:
                 cita = resp.json()[0]
                 manicurista = cita.get("manicurista", "tu manicurista")
@@ -987,10 +1016,12 @@ def confirmar_asistencia_manicure(cedula, fecha, hora):
                             f"✨ Servicio: {servicio}\n"
                             f"¡Te esperamos!"
                         )
-                        enviar_whatsapp(telefono, msg_cliente)
-            except Exception:
-                pass
-            return True, "Asistencia confirmada. ¡Se envió un WhatsApp de confirmación!"
+                        wa_ok, wa_err = enviar_whatsapp(telefono, msg_cliente)
+            except Exception as e:
+                wa_err = str(e)
+            if wa_ok:
+                return True, "Asistencia confirmada. ¡WhatsApp enviado al cliente!"
+            return True, f"Asistencia confirmada. (WhatsApp no enviado: {wa_err})"
         return False, "Error al confirmar. Intenta de nuevo."
     except requests.exceptions.RequestException:
         return False, "Error de conexion con la base de datos."
