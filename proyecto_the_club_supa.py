@@ -224,6 +224,12 @@ HEADERS = {
 }
 
 
+def limpiar_tel(t):
+    """Deja solo los digitos del telefono, para guardarlo y buscarlo
+    de forma consistente (sin espacios, guiones ni el +)."""
+    return "".join(c for c in str(t) if c.isdigit())
+
+
 def registrar_cliente(nombre, apellido, cedula, telefono, fecha_nacimiento):
     if nombre == "" or apellido == "" or cedula == "" or telefono == "":
         return False, "Todos los campos son obligatorios."
@@ -252,7 +258,7 @@ def registrar_cliente(nombre, apellido, cedula, telefono, fecha_nacimiento):
                 "cedula": cedula,
                 "nombre": nombre,
                 "apellido": apellido,
-                "telefono": telefono,
+                "telefono": limpiar_tel(telefono),
                 "fecha_nacimiento": fecha_nacimiento
             }
         )
@@ -279,6 +285,27 @@ def buscar_cliente(cedula):
                 apellido = data[0].get("apellido", "") or ""
                 completo = (nombre + " " + apellido).strip()
                 return completo if completo else None
+    except requests.exceptions.RequestException:
+        pass
+    return None
+
+
+def buscar_cliente_por_telefono(telefono):
+    """Retorna la fila del cliente (dict) buscando por telefono, o None.
+    Se usa como identificador principal en el flujo de citas."""
+    tel = limpiar_tel(telefono)
+    if tel == "":
+        return None
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/clientes",
+            headers=HEADERS,
+            params={"telefono": f"eq.{tel}"}
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if len(data) > 0:
+                return data[0]
     except requests.exceptions.RequestException:
         pass
     return None
@@ -1270,7 +1297,7 @@ elif st.session_state.pantalla == "agendar":
     st.markdown('<h1>AGENDAR CITA</h1>', unsafe_allow_html=True)
     st.markdown('<hr class="separador">', unsafe_allow_html=True)
 
-    cedula = st.text_input("Cedula del cliente")
+    telefono = st.text_input("Telefono del cliente")
 
     fecha_obj = st.date_input(
         "Fecha de la cita",
@@ -1326,48 +1353,19 @@ elif st.session_state.pantalla == "agendar":
                 )
 
             if st.button("CONFIRMAR RESERVA"):
-                if cedula.strip() == "" or not cedula.strip().isdigit():
-                    st.error("Ingrese una cedula valida.")
+                tel = limpiar_tel(telefono)
+                if tel == "":
+                    st.error("Ingrese un telefono valido.")
                 else:
-                    ok, msg = agendar_cita(cedula.strip(), fecha_str, hora, barbero, servicio)
-                    if ok:
-                        st.success(msg)
+                    cli = buscar_cliente_por_telefono(tel)
+                    if cli is None:
+                        st.error("Ese telefono no esta registrado.")
                     else:
-                        st.error(msg)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("← VOLVER AL MENU"):
-        ir_a("menu")
-        st.rerun()
-
-
-#  PANTALLA: BUSCAR CITAS POR CLIENTE 
-
-elif st.session_state.pantalla == "buscar":
-    set_fondo(FONDO_PATRON, "png")
-    st.markdown('<h1>BUSCAR CITAS POR CLIENTE</h1>', unsafe_allow_html=True)
-    st.markdown('<hr class="separador">', unsafe_allow_html=True)
-
-    cedula = st.text_input("Ingrese la cedula del cliente")
-
-    if st.button("CONSULTAR CITAS"):
-        if not cedula.strip().isdigit() or cedula.strip() == "":
-            st.error("Ingrese una cedula valida.")
-        else:
-            resultados = buscar_citas_cliente(cedula.strip())
-            if resultados:
-                st.success(f"{len(resultados)} cita(s) encontrada(s).")
-                for r in resultados:
-                    st.markdown(f"""
-                    <div class="resultado-card">
-                        <b>{r['Fecha']}</b> &nbsp;|&nbsp;
-                        <b>{r['Hora']}</b> &nbsp;|&nbsp;
-                        {r['Peluquero']} &nbsp;|&nbsp;
-                        {r['Servicio']}
-                    </div>
-                    """, unsafe_allow_html=True)
-            else:
-                st.warning("Sin registros para esa cedula.")
+                        ok, msg = agendar_cita(cli["cedula"], fecha_str, hora, barbero, servicio)
+                        if ok:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
 
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("← VOLVER AL MENU"):
@@ -1417,22 +1415,30 @@ elif st.session_state.pantalla == "confirmar":
     st.markdown("<p style='color:#e8d5a3;'>Puedes confirmar tu asistencia cuando falten <b style='color:#c9a84c;'>5 horas o menos</b> para tu cita.</p>", unsafe_allow_html=True)
 
     with st.form("form_confirmar"):
-        cedula = st.text_input("Cedula del cliente")
-        fecha  = st.text_input("Fecha de la cita (DD/MM/AAAA)")
+        telefono = st.text_input("Telefono del cliente")
+        fecha_obj = st.date_input(
+            "Fecha de la cita",
+            value=hoy_co(),
+            format="DD/MM/YYYY"
+        )
         hora   = st.selectbox("Hora de la cita", [str(h) for h in range(8, 21)])
         enviar = st.form_submit_button("CONFIRMAR MI ASISTENCIA")
 
     if enviar:
-        if not cedula.strip().isdigit() or cedula.strip() == "":
-            st.error("Ingrese una cedula valida.")
-        elif not fecha_valida(fecha.strip()):
-            st.error("Fecha invalida. Use el formato DD/MM/AAAA.")
+        fecha_str = fecha_obj.strftime("%d/%m/%Y")
+        tel = limpiar_tel(telefono)
+        if tel == "":
+            st.error("Ingrese un telefono valido.")
         else:
-            ok, msg = confirmar_asistencia(cedula.strip(), fecha.strip(), hora)
-            if ok:
-                st.success(msg)
+            cli = buscar_cliente_por_telefono(tel)
+            if cli is None:
+                st.error("Ese telefono no esta registrado.")
             else:
-                st.error(msg)
+                ok, msg = confirmar_asistencia(cli["cedula"], fecha_str, hora)
+                if ok:
+                    st.success(msg)
+                else:
+                    st.error(msg)
 
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("← VOLVER AL MENU"):
@@ -1476,7 +1482,7 @@ elif st.session_state.pantalla == "agendar_manicure":
     st.markdown('<h1>AGENDAR MANICURE</h1>', unsafe_allow_html=True)
     st.markdown('<hr class="separador">', unsafe_allow_html=True)
 
-    cedula = st.text_input("Cedula del cliente")
+    telefono = st.text_input("Telefono del cliente")
 
     fecha_obj = st.date_input(
         "Fecha de la cita",
@@ -1530,14 +1536,19 @@ elif st.session_state.pantalla == "agendar_manicure":
                 )
 
             if st.button("CONFIRMAR RESERVA", key="btn_reservar_m"):
-                if cedula.strip() == "" or not cedula.strip().isdigit():
-                    st.error("Ingrese una cedula valida.")
+                tel = limpiar_tel(telefono)
+                if tel == "":
+                    st.error("Ingrese un telefono valido.")
                 else:
-                    ok, msg = agendar_cita_manicure(cedula.strip(), fecha_str, hora, manicurista, servicio)
-                    if ok:
-                        st.success(msg)
+                    cli = buscar_cliente_por_telefono(tel)
+                    if cli is None:
+                        st.error("Ese telefono no esta registrado.")
                     else:
-                        st.error(msg)
+                        ok, msg = agendar_cita_manicure(cli["cedula"], fecha_str, hora, manicurista, servicio)
+                        if ok:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
 
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("← VOLVER", key="back_agendar_m"):
@@ -1591,22 +1602,31 @@ elif st.session_state.pantalla == "confirmar_manicure":
     st.markdown("<p style='color:#e8d5a3;'>Puedes confirmar tu asistencia cuando falten <b style='color:#c9a84c;'>5 horas o menos</b> para tu cita.</p>", unsafe_allow_html=True)
 
     with st.form("form_confirmar_m"):
-        cedula = st.text_input("Cedula del cliente")
-        fecha  = st.text_input("Fecha de la cita (DD/MM/AAAA)")
+        telefono = st.text_input("Telefono del cliente")
+        fecha_obj = st.date_input(
+            "Fecha de la cita",
+            value=hoy_co(),
+            format="DD/MM/YYYY",
+            key="fecha_conf_m"
+        )
         hora   = st.selectbox("Hora de la cita", [str(h) for h in range(8, 21)])
         enviar = st.form_submit_button("CONFIRMAR MI ASISTENCIA")
 
     if enviar:
-        if not cedula.strip().isdigit() or cedula.strip() == "":
-            st.error("Ingrese una cedula valida.")
-        elif not fecha_valida(fecha.strip()):
-            st.error("Fecha invalida. Use el formato DD/MM/AAAA.")
+        fecha_str = fecha_obj.strftime("%d/%m/%Y")
+        tel = limpiar_tel(telefono)
+        if tel == "":
+            st.error("Ingrese un telefono valido.")
         else:
-            ok, msg = confirmar_asistencia_manicure(cedula.strip(), fecha.strip(), hora)
-            if ok:
-                st.success(msg)
+            cli = buscar_cliente_por_telefono(tel)
+            if cli is None:
+                st.error("Ese telefono no esta registrado.")
             else:
-                st.error(msg)
+                ok, msg = confirmar_asistencia_manicure(cli["cedula"], fecha_str, hora)
+                if ok:
+                    st.success(msg)
+                else:
+                    st.error(msg)
 
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("← VOLVER", key="back_conf_m"):
