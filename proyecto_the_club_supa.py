@@ -742,6 +742,163 @@ def enviar_whatsapp(telefono, mensaje):
         return False, str(e)
 
 
+def cancelar_citas_dia_barbero(barbero):
+    """
+    Cancela las citas de HOY del barbero indicado y avisa por WhatsApp a cada
+    cliente afectado. Se usa al DESACTIVAR un barbero (falta del dia).
+    Solo toca las citas de la fecha de hoy: las de otros dias quedan intactas.
+    Retorna (canceladas, avisos_ok, errores) para mostrar feedback en pantalla.
+    """
+    hoy = hoy_co().strftime("%d/%m/%Y")
+    canceladas = 0
+    avisos_ok = 0
+    errores = []
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/citas",
+            headers=HEADERS,
+            params={"peluquero": f"eq.{barbero}", "fecha": f"eq.{hoy}"}
+        )
+        if resp.status_code != 200:
+            return 0, 0, ["No se pudieron leer las citas."]
+        citas = resp.json()
+    except requests.exceptions.RequestException:
+        return 0, 0, ["Error de conexion con la base de datos."]
+
+    for cita in citas:
+        cedula = cita.get("cedula", "")
+        fecha = cita.get("fecha", hoy)
+        hora = cita.get("hora", "")
+        servicio = cita.get("servicio", "")
+
+        # 1) Avisar al cliente por WhatsApp (antes de borrar, para tener sus datos)
+        try:
+            rc = requests.get(
+                f"{SUPABASE_URL}/rest/v1/clientes",
+                headers=HEADERS,
+                params={"cedula": f"eq.{cedula}"}
+            )
+            if rc.status_code == 200 and len(rc.json()) > 0:
+                cliente = rc.json()[0]
+                nombre = cliente.get("nombre", "Cliente")
+                telefono = cliente.get("telefono", "")
+                if telefono:
+                    msg = (
+                        f"⚠️ *The Club Barbershop*\n"
+                        f"Hola {nombre}, lamentamos avisarte que tu cita fue *cancelada*.\n"
+                        f"📅 Fecha: {fecha}\n"
+                        f"🕐 Hora: {hora}:00\n"
+                        f"💈 Barbero: {barbero} (no disponible hoy)\n"
+                        f"✂️ Servicio: {servicio}\n"
+                        f"Por favor reagenda con otro barbero. ¡Disculpa las molestias!"
+                    )
+                    ok, err = enviar_whatsapp(telefono, msg)
+                    if ok:
+                        avisos_ok += 1
+                    else:
+                        errores.append(f"{nombre}: {err}")
+                else:
+                    errores.append(f"{nombre or cedula}: sin telefono registrado.")
+        except Exception as e:
+            errores.append(str(e))
+
+        # 2) Borrar la cita (y su confirmacion, si la habia)
+        try:
+            requests.delete(
+                f"{SUPABASE_URL}/rest/v1/citas",
+                headers=HEADERS,
+                params={"cedula": f"eq.{cedula}", "fecha": f"eq.{fecha}",
+                        "hora": f"eq.{hora}", "peluquero": f"eq.{barbero}"}
+            )
+            requests.delete(
+                f"{SUPABASE_URL}/rest/v1/confirmados",
+                headers=HEADERS,
+                params={"cedula": f"eq.{cedula}", "fecha": f"eq.{fecha}", "hora": f"eq.{hora}"}
+            )
+            canceladas += 1
+        except requests.exceptions.RequestException:
+            errores.append(f"No se pudo borrar la cita de {cedula} a las {hora}.")
+
+    return canceladas, avisos_ok, errores
+
+
+def cancelar_citas_dia_manicurista(manicurista):
+    """
+    Espejo de cancelar_citas_dia_barbero, para las citas de manicure de HOY.
+    Se usa al DESACTIVAR una manicurista. Solo toca las citas de hoy.
+    Retorna (canceladas, avisos_ok, errores).
+    """
+    hoy = hoy_co().strftime("%d/%m/%Y")
+    canceladas = 0
+    avisos_ok = 0
+    errores = []
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/citas_manicure",
+            headers=HEADERS,
+            params={"manicurista": f"eq.{manicurista}", "fecha": f"eq.{hoy}"}
+        )
+        if resp.status_code != 200:
+            return 0, 0, ["No se pudieron leer las citas de manicure."]
+        citas = resp.json()
+    except requests.exceptions.RequestException:
+        return 0, 0, ["Error de conexion con la base de datos."]
+
+    for cita in citas:
+        cedula = cita.get("cedula", "")
+        fecha = cita.get("fecha", hoy)
+        hora = cita.get("hora", "")
+        servicio = cita.get("servicio", "")
+
+        try:
+            rc = requests.get(
+                f"{SUPABASE_URL}/rest/v1/clientes",
+                headers=HEADERS,
+                params={"cedula": f"eq.{cedula}"}
+            )
+            if rc.status_code == 200 and len(rc.json()) > 0:
+                cliente = rc.json()[0]
+                nombre = cliente.get("nombre", "Cliente")
+                telefono = cliente.get("telefono", "")
+                if telefono:
+                    msg = (
+                        f"⚠️ *The Club Barbershop*\n"
+                        f"Hola {nombre}, lamentamos avisarte que tu cita fue *cancelada*.\n"
+                        f"📅 Fecha: {fecha}\n"
+                        f"🕐 Hora: {hora}:00\n"
+                        f"💅 Manicurista: {manicurista} (no disponible hoy)\n"
+                        f"✨ Servicio: {servicio}\n"
+                        f"Por favor reagenda con otra manicurista. ¡Disculpa las molestias!"
+                    )
+                    ok, err = enviar_whatsapp(telefono, msg)
+                    if ok:
+                        avisos_ok += 1
+                    else:
+                        errores.append(f"{nombre}: {err}")
+                else:
+                    errores.append(f"{nombre or cedula}: sin telefono registrado.")
+        except Exception as e:
+            errores.append(str(e))
+
+        try:
+            requests.delete(
+                f"{SUPABASE_URL}/rest/v1/citas_manicure",
+                headers=HEADERS,
+                params={"cedula": f"eq.{cedula}", "fecha": f"eq.{fecha}",
+                        "hora": f"eq.{hora}", "manicurista": f"eq.{manicurista}"}
+            )
+            requests.delete(
+                f"{SUPABASE_URL}/rest/v1/confirmados_manicure",
+                headers=HEADERS,
+                params={"cedula": f"eq.{cedula}", "fecha": f"eq.{fecha}", "hora": f"eq.{hora}"}
+            )
+            canceladas += 1
+        except requests.exceptions.RequestException:
+            errores.append(f"No se pudo borrar la cita de {cedula} a las {hora}.")
+
+    return canceladas, avisos_ok, errores
+
+
 def get_precios():
     """Retorna dict {servicio: precio} con todos los precios actuales."""
     resultado = {}
@@ -1765,6 +1922,9 @@ elif st.session_state.pantalla == "admin":
 
             # --- TAB 3: Agregar / Quitar ---
             with tab3:
+                if st.session_state.get("flash_barbero"):
+                    st.success(st.session_state.flash_barbero)
+                    st.session_state.flash_barbero = ""
                 nuevo = st.text_input("Nombre del nuevo barbero", key="nuevo_barbero")
                 if st.button("AGREGAR BARBERO", key="btn_add_barbero"):
                     ok, msg = agregar_barbero(nuevo.strip())
@@ -1786,7 +1946,20 @@ elif st.session_state.pantalla == "admin":
                     with c2:
                         label = "Activar" if not b.get("activo") else "Desactivar"
                         if st.button(label, key=f"act_{b['id']}"):
-                            set_activo_barbero(b["id"], not b.get("activo"))
+                            nuevo_estado = not b.get("activo")
+                            set_activo_barbero(b["id"], nuevo_estado)
+                            if not nuevo_estado:  # se esta DESACTIVANDO
+                                canc, avisos, errs = cancelar_citas_dia_barbero(b["nombre"])
+                                flash = (
+                                    f"{b['nombre']} desactivado. "
+                                    f"Citas de hoy canceladas: {canc}. "
+                                    f"WhatsApp enviados: {avisos}."
+                                )
+                                if errs:
+                                    flash += " Avisos con problema: " + " | ".join(errs)
+                                st.session_state.flash_barbero = flash
+                            else:
+                                st.session_state.flash_barbero = f"{b['nombre']} activado de nuevo."
                             st.rerun()
                     with c3:
                         if st.button("Quitar", key=f"del_{b['id']}"):
@@ -1845,6 +2018,9 @@ elif st.session_state.pantalla == "admin":
 
             # --- TAB 3: Agregar / Quitar ---
             with mtab3:
+                if st.session_state.get("flash_manicurista"):
+                    st.success(st.session_state.flash_manicurista)
+                    st.session_state.flash_manicurista = ""
                 nueva = st.text_input("Nombre de la nueva manicurista", key="nueva_manicurista")
                 if st.button("AGREGAR MANICURISTA", key="btn_add_manicurista"):
                     ok, msg = agregar_manicurista(nueva.strip())
@@ -1866,7 +2042,20 @@ elif st.session_state.pantalla == "admin":
                     with c2:
                         label = "Activar" if not m.get("activo") else "Desactivar"
                         if st.button(label, key=f"act_m_{m['id']}"):
-                            set_activo_manicurista(m["id"], not m.get("activo"))
+                            nuevo_estado = not m.get("activo")
+                            set_activo_manicurista(m["id"], nuevo_estado)
+                            if not nuevo_estado:  # se esta DESACTIVANDO
+                                canc, avisos, errs = cancelar_citas_dia_manicurista(m["nombre"])
+                                flash = (
+                                    f"{m['nombre']} desactivada. "
+                                    f"Citas de hoy canceladas: {canc}. "
+                                    f"WhatsApp enviados: {avisos}."
+                                )
+                                if errs:
+                                    flash += " Avisos con problema: " + " | ".join(errs)
+                                st.session_state.flash_manicurista = flash
+                            else:
+                                st.session_state.flash_manicurista = f"{m['nombre']} activada de nuevo."
                             st.rerun()
                     with c3:
                         if st.button("Quitar", key=f"del_m_{m['id']}"):
